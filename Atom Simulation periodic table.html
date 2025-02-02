@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Interactive Periodic Table & 3D Atom</title>
+    <style>
+      /* General Page Styles */
+      body {
+        margin: 0;
+        font-family: sans-serif;
+        background: #222;
+        color: #ddd;
+      }
+      h1 {
+        text-align: center;
+        margin: 1rem 0;
+      }
+      .container {
+        display: flex;
+        height: calc(100vh - 70px);
+      }
+      /* Left Column: Full Periodic Table */
+      .col1 {
+        width: 750px;
+        overflow-y: auto;
+        background: #333;
+        padding: 1rem;
+      }
+      /* The grid container mimics the complete periodic table layout */
+      .periodic-grid {
+        display: grid;
+        grid-template-columns: repeat(18, 1fr);
+        grid-auto-rows: 60px;
+        gap: 2px;
+      }
+      .element {
+        background: #444;
+        border: 1px solid #555;
+        text-align: center;
+        font-size: 0.75rem;
+        padding: 2px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: background 0.2s;
+      }
+      .element:hover {
+        background: #666;
+      }
+      .element .symbol {
+        font-size: 1.2rem;
+        font-weight: bold;
+        display: block;
+      }
+      .element .number {
+        position: absolute;
+        top: 2px;
+        left: 4px;
+        font-size: 0.7rem;
+      }
+      .element .name {
+        font-size: 0.65rem;
+      }
+      /* Right Column: 3D Visualization */
+      .col2 {
+        flex: 1;
+        position: relative;
+      }
+      #visualization {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Interactive Periodic Table & 3D Atom</h1>
+    <div class="container">
+      <!-- Column 1: Full Periodic Table -->
+      <div class="col1">
+        <div class="periodic-grid" id="full-periodic-table">
+          <!-- Elements will be injected here -->
+        </div>
+      </div>
+      <!-- Column 2: 3D Visualization -->
+      <div class="col2">
+        <div id="visualization"></div>
+      </div>
+    </div>
+
+    <!-- Include Three.js and OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+      /***** GLOBAL VARIABLES FOR 3D VISUALIZATION *****/
+      let scene, camera, renderer, controls;
+      let nucleusGroup, electronGroup; // groups for the nucleus and electrons
+      let electrons = []; // array for electron meshes (for animation)
+      let currentAtomicNumber = 1; // default element: Hydrogen
+
+      /***** THREE.JS SCENE SETUP *****/
+      function initScene() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+
+        // Camera
+        camera = new THREE.PerspectiveCamera(
+          75,
+          document.getElementById("visualization").clientWidth /
+            document.getElementById("visualization").clientHeight,
+          0.1,
+          1000
+        );
+        camera.position.set(0, 30, 80);
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(
+          document.getElementById("visualization").clientWidth,
+          document.getElementById("visualization").clientHeight
+        );
+        renderer.shadowMap.enabled = true;
+        document.getElementById("visualization").appendChild(renderer.domElement);
+
+        // Controls
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enableZoom = true;
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.0);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        directionalLight.position.set(50, 50, 50);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 1024;
+        directionalLight.shadow.mapSize.height = 1024;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 500;
+        scene.add(directionalLight);
+
+        // Optional ground plane to catch shadows
+        const planeGeometry = new THREE.PlaneGeometry(200, 200);
+        const planeMaterial = new THREE.ShadowMaterial({ opacity: 0.2 });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = -40;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        window.addEventListener("resize", onWindowResize, false);
+      }
+
+      function onWindowResize() {
+        camera.aspect =
+          document.getElementById("visualization").clientWidth /
+          document.getElementById("visualization").clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(
+          document.getElementById("visualization").clientWidth,
+          document.getElementById("visualization").clientHeight
+        );
+      }
+
+      /***** ATOM VISUALIZATION FUNCTIONS *****/
+      function createNucleus(atomicNumber) {
+        const group = new THREE.Group();
+        // For simplicity, create one particle per proton.
+        const particleCount = atomicNumber;
+        const nucleusRadius = 6;
+        for (let i = 0; i < particleCount; i++) {
+          const particleGeometry = new THREE.SphereGeometry(1.2, 16, 16);
+          const particleMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+          const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+          particle.castShadow = true;
+          particle.receiveShadow = true;
+          // Random distribution within a sphere
+          const phi = Math.acos(2 * Math.random() - 1);
+          const theta = 2 * Math.PI * Math.random();
+          const r = nucleusRadius * Math.cbrt(Math.random());
+          particle.position.set(
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.sin(phi) * Math.sin(theta),
+            r * Math.cos(phi)
+          );
+          group.add(particle);
+        }
+        return group;
+      }
+
+      // A very simplified electron configuration (Bohr model)
+      function getElectronConfiguration(atomicNumber) {
+        let config = [];
+        if (atomicNumber <= 2) {
+          config.push(atomicNumber);
+        } else if (atomicNumber <= 10) {
+          config.push(2);
+          config.push(atomicNumber - 2);
+        } else {
+          config.push(2);
+          config.push(8);
+          config.push(atomicNumber - 10);
+        }
+        return config;
+      }
+
+      function createElectrons(atomicNumber) {
+        electrons = []; // reset global electrons array
+        const group = new THREE.Group();
+        const config = getElectronConfiguration(atomicNumber);
+        const shellRadii = [12, 22, 32];
+        config.forEach((electronsInShell, shellIndex) => {
+          const radius = shellRadii[shellIndex] || (12 + shellIndex * 10);
+          // Give each shell a slight random tilt.
+          const eulerRotation = new THREE.Euler(
+            Math.random() * Math.PI * 0.5,
+            Math.random() * Math.PI * 0.5,
+            Math.random() * Math.PI * 0.5
+          );
+          const orbitQuaternion = new THREE.Quaternion().setFromEuler(eulerRotation);
+
+          // Create orbit path (a circle) for this shell.
+          const segments = 64;
+          const orbitVertices = [];
+          for (let j = 0; j <= segments; j++) {
+            const theta = (j / segments) * Math.PI * 2;
+            const point = new THREE.Vector3(radius * Math.cos(theta), 0, radius * Math.sin(theta));
+            point.applyQuaternion(orbitQuaternion);
+            orbitVertices.push(point.x, point.y, point.z);
+          }
+          const orbitGeometry = new THREE.BufferGeometry();
+          orbitGeometry.setAttribute("position", new THREE.Float32BufferAttribute(orbitVertices, 3));
+          const orbitMaterial = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            opacity: 0.3,
+            transparent: true,
+          });
+          const orbitLine = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+          group.add(orbitLine);
+
+          // Place electrons evenly along the orbit.
+          for (let k = 0; k < electronsInShell; k++) {
+            const electronGeometry = new THREE.SphereGeometry(1.2, 16, 16);
+            const electronMaterial = new THREE.MeshPhongMaterial({ color: 0x00bfff });
+            const electron = new THREE.Mesh(electronGeometry, electronMaterial);
+            electron.castShadow = true;
+            electron.receiveShadow = true;
+            const angle = (k / electronsInShell) * Math.PI * 2;
+            electron.userData = {
+              angle: angle,
+              speed: 0.01 + Math.random() * 0.01,
+              orbitRadius: radius,
+              orbitQuaternion: orbitQuaternion
+            };
+            let pos = new THREE.Vector3(radius * Math.cos(angle), 0, radius * Math.sin(angle));
+            pos.applyQuaternion(orbitQuaternion);
+            electron.position.copy(pos);
+            group.add(electron);
+            electrons.push(electron);
+          }
+        });
+        return group;
+      }
+
+      function updateAtom(atomicNumber) {
+        currentAtomicNumber = atomicNumber;
+        if (nucleusGroup) scene.remove(nucleusGroup);
+        if (electronGroup) scene.remove(electronGroup);
+        nucleusGroup = createNucleus(atomicNumber);
+        electronGroup = createElectrons(atomicNumber);
+        scene.add(nucleusGroup);
+        scene.add(electronGroup);
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // Rotate and wobble the nucleus.
+        if (nucleusGroup) {
+          nucleusGroup.rotation.y += 0.005;
+          nucleusGroup.rotation.x = Math.sin(Date.now() * 0.001) * 0.1;
+        }
+
+        // Animate electrons along their orbits.
+        electrons.forEach(electron => {
+          electron.userData.angle += electron.userData.speed;
+          const a = electron.userData.angle;
+          const r = electron.userData.orbitRadius;
+          let pos = new THREE.Vector3(r * Math.cos(a), 0, r * Math.sin(a));
+          pos.applyQuaternion(electron.userData.orbitQuaternion);
+          electron.position.copy(pos);
+        });
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      /***** PERIODIC TABLE DATA AND LAYOUT *****/
+      // Array of all 118 elements with grid positions.
+      // Each element has: atomicNumber, symbol, name, atomicMass, gridRow, gridColumn.
+      // The grid positions are chosen to mimic the complete periodic table layout.
+      const elements = [
+        // Period 1
+        { atomicNumber: 1, symbol: "H",  name: "Hydrogen",  atomicMass: "1.008",  gridRow: 1, gridColumn: 1 },
+        { atomicNumber: 2, symbol: "He", name: "Helium",    atomicMass: "4.0026", gridRow: 1, gridColumn: 18 },
+        // Period 2
+        { atomicNumber: 3, symbol: "Li", name: "Lithium",   atomicMass: "6.94",   gridRow: 2, gridColumn: 1 },
+        { atomicNumber: 4, symbol: "Be", name: "Beryllium", atomicMass: "9.0122", gridRow: 2, gridColumn: 2 },
+        { atomicNumber: 5, symbol: "B",  name: "Boron",     atomicMass: "10.81",  gridRow: 2, gridColumn: 13 },
+        { atomicNumber: 6, symbol: "C",  name: "Carbon",    atomicMass: "12.011", gridRow: 2, gridColumn: 14 },
+        { atomicNumber: 7, symbol: "N",  name: "Nitrogen",  atomicMass: "14.007", gridRow: 2, gridColumn: 15 },
+        { atomicNumber: 8, symbol: "O",  name: "Oxygen",    atomicMass: "15.999", gridRow: 2, gridColumn: 16 },
+        { atomicNumber: 9, symbol: "F",  name: "Fluorine",  atomicMass: "18.998", gridRow: 2, gridColumn: 17 },
+        { atomicNumber: 10, symbol: "Ne", name: "Neon",     atomicMass: "20.180", gridRow: 2, gridColumn: 18 },
+        // Period 3
+        { atomicNumber: 11, symbol: "Na", name: "Sodium",      atomicMass: "22.990", gridRow: 3, gridColumn: 1 },
+        { atomicNumber: 12, symbol: "Mg", name: "Magnesium",   atomicMass: "24.305", gridRow: 3, gridColumn: 2 },
+        { atomicNumber: 13, symbol: "Al", name: "Aluminum",    atomicMass: "26.982", gridRow: 3, gridColumn: 13 },
+        { atomicNumber: 14, symbol: "Si", name: "Silicon",     atomicMass: "28.085", gridRow: 3, gridColumn: 14 },
+        { atomicNumber: 15, symbol: "P",  name: "Phosphorus",  atomicMass: "30.974", gridRow: 3, gridColumn: 15 },
+        { atomicNumber: 16, symbol: "S",  name: "Sulfur",      atomicMass: "32.06",  gridRow: 3, gridColumn: 16 },
+        { atomicNumber: 17, symbol: "Cl", name: "Chlorine",    atomicMass: "35.45",  gridRow: 3, gridColumn: 17 },
+        { atomicNumber: 18, symbol: "Ar", name: "Argon",       atomicMass: "39.948", gridRow: 3, gridColumn: 18 },
+        // Period 4
+        { atomicNumber: 19, symbol: "K",  name: "Potassium",   atomicMass: "39.098", gridRow: 4, gridColumn: 1 },
+        { atomicNumber: 20, symbol: "Ca", name: "Calcium",     atomicMass: "40.078", gridRow: 4, gridColumn: 2 },
+        { atomicNumber: 21, symbol: "Sc", name: "Scandium",    atomicMass: "44.956", gridRow: 4, gridColumn: 3 },
+        { atomicNumber: 22, symbol: "Ti", name: "Titanium",    atomicMass: "47.867", gridRow: 4, gridColumn: 4 },
+        { atomicNumber: 23, symbol: "V",  name: "Vanadium",    atomicMass: "50.942", gridRow: 4, gridColumn: 5 },
+        { atomicNumber: 24, symbol: "Cr", name: "Chromium",    atomicMass: "51.996", gridRow: 4, gridColumn: 6 },
+        { atomicNumber: 25, symbol: "Mn", name: "Manganese",   atomicMass: "54.938", gridRow: 4, gridColumn: 7 },
+        { atomicNumber: 26, symbol: "Fe", name: "Iron",        atomicMass: "55.845", gridRow: 4, gridColumn: 8 },
+        { atomicNumber: 27, symbol: "Co", name: "Cobalt",      atomicMass: "58.933", gridRow: 4, gridColumn: 9 },
+        { atomicNumber: 28, symbol: "Ni", name: "Nickel",      atomicMass: "58.693", gridRow: 4, gridColumn: 10 },
+        { atomicNumber: 29, symbol: "Cu", name: "Copper",      atomicMass: "63.546", gridRow: 4, gridColumn: 11 },
+        { atomicNumber: 30, symbol: "Zn", name: "Zinc",        atomicMass: "65.38",  gridRow: 4, gridColumn: 12 },
+        { atomicNumber: 31, symbol: "Ga", name: "Gallium",     atomicMass: "69.723", gridRow: 4, gridColumn: 13 },
+        { atomicNumber: 32, symbol: "Ge", name: "Germanium",   atomicMass: "72.630", gridRow: 4, gridColumn: 14 },
+        { atomicNumber: 33, symbol: "As", name: "Arsenic",     atomicMass: "74.922", gridRow: 4, gridColumn: 15 },
+        { atomicNumber: 34, symbol: "Se", name: "Selenium",    atomicMass: "78.971", gridRow: 4, gridColumn: 16 },
+        { atomicNumber: 35, symbol: "Br", name: "Bromine",     atomicMass: "79.904", gridRow: 4, gridColumn: 17 },
+        { atomicNumber: 36, symbol: "Kr", name: "Krypton",     atomicMass: "83.798", gridRow: 4, gridColumn: 18 },
+        // Period 5
+        { atomicNumber: 37, symbol: "Rb", name: "Rubidium",    atomicMass: "85.468", gridRow: 5, gridColumn: 1 },
+        { atomicNumber: 38, symbol: "Sr", name: "Strontium",   atomicMass: "87.62",  gridRow: 5, gridColumn: 2 },
+        { atomicNumber: 39, symbol: "Y",  name: "Yttrium",     atomicMass: "88.906", gridRow: 5, gridColumn: 3 },
+        { atomicNumber: 40, symbol: "Zr", name: "Zirconium",   atomicMass: "91.224", gridRow: 5, gridColumn: 4 },
+        { atomicNumber: 41, symbol: "Nb", name: "Niobium",     atomicMass: "92.906", gridRow: 5, gridColumn: 5 },
+        { atomicNumber: 42, symbol: "Mo", name: "Molybdenum",  atomicMass: "95.95",  gridRow: 5, gridColumn: 6 },
+        { atomicNumber: 43, symbol: "Tc", name: "Technetium",  atomicMass: "[98]",  gridRow: 5, gridColumn: 7 },
+        { atomicNumber: 44, symbol: "Ru", name: "Ruthenium",   atomicMass: "101.07",gridRow: 5, gridColumn: 8 },
+        { atomicNumber: 45, symbol: "Rh", name: "Rhodium",     atomicMass: "102.91",gridRow: 5, gridColumn: 9 },
+        { atomicNumber: 46, symbol: "Pd", name: "Palladium",   atomicMass: "106.42",gridRow: 5, gridColumn: 10 },
+        { atomicNumber: 47, symbol: "Ag", name: "Silver",      atomicMass: "107.87",gridRow: 5, gridColumn: 11 },
+        { atomicNumber: 48, symbol: "Cd", name: "Cadmium",     atomicMass: "112.41",gridRow: 5, gridColumn: 12 },
+        { atomicNumber: 49, symbol: "In", name: "Indium",      atomicMass: "114.82",gridRow: 5, gridColumn: 13 },
+        { atomicNumber: 50, symbol: "Sn", name: "Tin",         atomicMass: "118.71",gridRow: 5, gridColumn: 14 },
+        { atomicNumber: 51, symbol: "Sb", name: "Antimony",    atomicMass: "121.76",gridRow: 5, gridColumn: 15 },
+        { atomicNumber: 52, symbol: "Te", name: "Tellurium",   atomicMass: "127.60",gridRow: 5, gridColumn: 16 },
+        { atomicNumber: 53, symbol: "I",  name: "Iodine",      atomicMass: "126.90",gridRow: 5, gridColumn: 17 },
+        { atomicNumber: 54, symbol: "Xe", name: "Xenon",       atomicMass: "131.29",gridRow: 5, gridColumn: 18 },
+        // Period 6 (main block)
+        { atomicNumber: 55, symbol: "Cs", name: "Cesium",      atomicMass: "132.91",gridRow: 6, gridColumn: 1 },
+        { atomicNumber: 56, symbol: "Ba", name: "Barium",      atomicMass: "137.33",gridRow: 6, gridColumn: 2 },
+        { atomicNumber: 57, symbol: "La", name: "Lanthanum",   atomicMass: "138.91",gridRow: 6, gridColumn: 3 },
+        // Skip lanthanides in main block – they will be placed separately.
+        { atomicNumber: 72, symbol: "Hf", name: "Hafnium",     atomicMass: "178.49",gridRow: 6, gridColumn: 4 },
+        { atomicNumber: 73, symbol: "Ta", name: "Tantalum",    atomicMass: "180.95",gridRow: 6, gridColumn: 5 },
+        { atomicNumber: 74, symbol: "W",  name: "Tungsten",    atomicMass: "183.84",gridRow: 6, gridColumn: 6 },
+        { atomicNumber: 75, symbol: "Re", name: "Rhenium",     atomicMass: "186.21",gridRow: 6, gridColumn: 7 },
+        { atomicNumber: 76, symbol: "Os", name: "Osmium",      atomicMass: "190.23",gridRow: 6, gridColumn: 8 },
+        { atomicNumber: 77, symbol: "Ir", name: "Iridium",     atomicMass: "192.22",gridRow: 6, gridColumn: 9 },
+        { atomicNumber: 78, symbol: "Pt", name: "Platinum",    atomicMass: "195.08",gridRow: 6, gridColumn: 10 },
+        { atomicNumber: 79, symbol: "Au", name: "Gold",        atomicMass: "196.97",gridRow: 6, gridColumn: 11 },
+        { atomicNumber: 80, symbol: "Hg", name: "Mercury",     atomicMass: "200.59",gridRow: 6, gridColumn: 12 },
+        { atomicNumber: 81, symbol: "Tl", name: "Thallium",    atomicMass: "204.38",gridRow: 6, gridColumn: 13 },
+        { atomicNumber: 82, symbol: "Pb", name: "Lead",        atomicMass: "207.2", gridRow: 6, gridColumn: 14 },
+        { atomicNumber: 83, symbol: "Bi", name: "Bismuth",     atomicMass: "208.98",gridRow: 6, gridColumn: 15 },
+        { atomicNumber: 84, symbol: "Po", name: "Polonium",    atomicMass: "[209]", gridRow: 6, gridColumn: 16 },
+        { atomicNumber: 85, symbol: "At", name: "Astatine",    atomicMass: "[210]", gridRow: 6, gridColumn: 17 },
+        { atomicNumber: 86, symbol: "Rn", name: "Radon",       atomicMass: "[222]", gridRow: 6, gridColumn: 18 },
+        // Period 7 (main block)
+        { atomicNumber: 87, symbol: "Fr", name: "Francium",    atomicMass: "[223]",gridRow: 7, gridColumn: 1 },
+        { atomicNumber: 88, symbol: "Ra", name: "Radium",      atomicMass: "[226]",gridRow: 7, gridColumn: 2 },
+        { atomicNumber: 89, symbol: "Ac", name: "Actinium",    atomicMass: "[227]",gridRow: 7, gridColumn: 3 },
+        { atomicNumber: 104, symbol: "Rf", name: "Rutherfordium", atomicMass: "[267]", gridRow: 7, gridColumn: 4 },
+        { atomicNumber: 105, symbol: "Db", name: "Dubnium",     atomicMass: "[268]",gridRow: 7, gridColumn: 5 },
+        { atomicNumber: 106, symbol: "Sg", name: "Seaborgium",  atomicMass: "[271]",gridRow: 7, gridColumn: 6 },
+        { atomicNumber: 107, symbol: "Bh", name: "Bohrium",     atomicMass: "[270]",gridRow: 7, gridColumn: 7 },
+        { atomicNumber: 108, symbol: "Hs", name: "Hassium",     atomicMass: "[277]",gridRow: 7, gridColumn: 8 },
+        { atomicNumber: 109, symbol: "Mt", name: "Meitnerium",  atomicMass: "[278]",gridRow: 7, gridColumn: 9 },
+        { atomicNumber: 110, symbol: "Ds", name: "Darmstadtium",atomicMass: "[281]",gridRow: 7, gridColumn: 10 },
+        { atomicNumber: 111, symbol: "Rg", name: "Roentgenium", atomicMass: "[282]",gridRow: 7, gridColumn: 11 },
+        { atomicNumber: 112, symbol: "Cn", name: "Copernicium",atomicMass: "[285]",gridRow: 7, gridColumn: 12 },
+        { atomicNumber: 113, symbol: "Nh", name: "Nihonium",    atomicMass: "[286]",gridRow: 7, gridColumn: 13 },
+        { atomicNumber: 114, symbol: "Fl", name: "Flerovium",  atomicMass: "[289]",gridRow: 7, gridColumn: 14 },
+        { atomicNumber: 115, symbol: "Mc", name: "Moscovium",   atomicMass: "[290]",gridRow: 7, gridColumn: 15 },
+        { atomicNumber: 116, symbol: "Lv", name: "Livermorium", atomicMass: "[293]",gridRow: 7, gridColumn: 16 },
+        { atomicNumber: 117, symbol: "Ts", name: "Tennessine",  atomicMass: "[294]",gridRow: 7, gridColumn: 17 },
+        { atomicNumber: 118, symbol: "Og", name: "Oganesson",   atomicMass: "[294]",gridRow: 7, gridColumn: 18 },
+        // Lanthanides (displayed as a separate row below period 6)
+        { atomicNumber: 58, symbol: "Ce", name: "Cerium",      atomicMass: "140.12", gridRow: 8, gridColumn: 4 },
+        { atomicNumber: 59, symbol: "Pr", name: "Praseodymium",atomicMass: "140.91", gridRow: 8, gridColumn: 5 },
+        { atomicNumber: 60, symbol: "Nd", name: "Neodymium",   atomicMass: "144.24", gridRow: 8, gridColumn: 6 },
+        { atomicNumber: 61, symbol: "Pm", name: "Promethium",  atomicMass: "[145]", gridRow: 8, gridColumn: 7 },
+        { atomicNumber: 62, symbol: "Sm", name: "Samarium",    atomicMass: "150.36", gridRow: 8, gridColumn: 8 },
+        { atomicNumber: 63, symbol: "Eu", name: "Europium",    atomicMass: "151.96", gridRow: 8, gridColumn: 9 },
+        { atomicNumber: 64, symbol: "Gd", name: "Gadolinium",  atomicMass: "157.25", gridRow: 8, gridColumn: 10 },
+        { atomicNumber: 65, symbol: "Tb", name: "Terbium",     atomicMass: "158.93", gridRow: 8, gridColumn: 11 },
+        { atomicNumber: 66, symbol: "Dy", name: "Dysprosium",  atomicMass: "162.50", gridRow: 8, gridColumn: 12 },
+        { atomicNumber: 67, symbol: "Ho", name: "Holmium",     atomicMass: "164.93", gridRow: 8, gridColumn: 13 },
+        { atomicNumber: 68, symbol: "Er", name: "Erbium",      atomicMass: "167.26", gridRow: 8, gridColumn: 14 },
+        { atomicNumber: 69, symbol: "Tm", name: "Thulium",     atomicMass: "168.93", gridRow: 8, gridColumn: 15 },
+        { atomicNumber: 70, symbol: "Yb", name: "Ytterbium",   atomicMass: "173.05", gridRow: 8, gridColumn: 16 },
+        { atomicNumber: 71, symbol: "Lu", name: "Lutetium",    atomicMass: "174.97", gridRow: 8, gridColumn: 17 },
+        // Actinides (displayed as a separate row below period 7)
+        { atomicNumber: 90, symbol: "Th", name: "Thorium",     atomicMass: "232.04", gridRow: 9, gridColumn: 4 },
+        { atomicNumber: 91, symbol: "Pa", name: "Protactinium",atomicMass: "231.04", gridRow: 9, gridColumn: 5 },
+        { atomicNumber: 92, symbol: "U",  name: "Uranium",     atomicMass: "238.03", gridRow: 9, gridColumn: 6 },
+        { atomicNumber: 93, symbol: "Np", name: "Neptunium",   atomicMass: "[237]", gridRow: 9, gridColumn: 7 },
+        { atomicNumber: 94, symbol: "Pu", name: "Plutonium",   atomicMass: "[244]", gridRow: 9, gridColumn: 8 },
+        { atomicNumber: 95, symbol: "Am", name: "Americium",   atomicMass: "[243]", gridRow: 9, gridColumn: 9 },
+        { atomicNumber: 96, symbol: "Cm", name: "Curium",      atomicMass: "[247]", gridRow: 9, gridColumn: 10 },
+        { atomicNumber: 97, symbol: "Bk", name: "Berkelium",   atomicMass: "[247]", gridRow: 9, gridColumn: 11 },
+        { atomicNumber: 98, symbol: "Cf", name: "Californium", atomicMass: "[251]", gridRow: 9, gridColumn: 12 },
+        { atomicNumber: 99, symbol: "Es", name: "Einsteinium", atomicMass: "[252]", gridRow: 9, gridColumn: 13 },
+        { atomicNumber: 100, symbol: "Fm", name: "Fermium",    atomicMass: "[257]", gridRow: 9, gridColumn: 14 },
+        { atomicNumber: 101, symbol: "Md", name: "Mendelevium",atomicMass: "[258]", gridRow: 9, gridColumn: 15 },
+        { atomicNumber: 102, symbol: "No", name: "Nobelium",   atomicMass: "[259]", gridRow: 9, gridColumn: 16 },
+        { atomicNumber: 103, symbol: "Lr", name: "Lawrencium", atomicMass: "[262]", gridRow: 9, gridColumn: 17 },
+      ];
+
+      // Build the periodic table grid.
+      function initPeriodicTable() {
+        const container = document.getElementById("full-periodic-table");
+        elements.forEach(el => {
+          const div = document.createElement("div");
+          div.className = "element";
+          // Position the element using CSS Grid inline styles.
+          div.style.gridRow = el.gridRow;
+          div.style.gridColumn = el.gridColumn;
+          div.innerHTML = `
+            <div class="number">${el.atomicNumber}</div>
+            <span class="symbol">${el.symbol}</span>
+            <span class="name">${el.name}</span>
+            <div class="mass">${el.atomicMass}</div>
+          `;
+          // When clicked, update the 3D atom visualization.
+          div.addEventListener("click", () => {
+            updateAtom(el.atomicNumber);
+          });
+          container.appendChild(div);
+        });
+      }
+
+      /***** INITIALIZATION *****/
+      initScene();
+      initPeriodicTable();
+      updateAtom(currentAtomicNumber);
+      animate();
+    </script>
+  </body>
+</html>
